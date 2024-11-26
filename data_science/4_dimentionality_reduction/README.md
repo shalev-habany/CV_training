@@ -1,7 +1,7 @@
 ### Dimentionality reduction
 
 #### Theory
- - Read pages 559-570 about PCA in Bishop book – first part on PCA, and more in the internet of course :)
+ - Read pages 559-570 about PCA in Bishop book – first part on PCA, and more in the internet of course :
  - Read about kernels in Bishop Chapter 6 up to 6.1 (pages 292-294).
  - Solve exercise 6.3 in the end of the chapter (page 320)
  - Read about KPCA in Bishop 586-590 

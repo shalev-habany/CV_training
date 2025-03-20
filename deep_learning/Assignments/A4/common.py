@@ -59,7 +59,8 @@ class DetectorBackboneWithFPN(nn.Module):
         # batches of tensors in NCHW format, that give intermediate features
         # from the backbone network.
         dummy_out = self.backbone(torch.randn(2, 3, 224, 224))
-        dummy_out_shapes = [(key, value.shape) for key, value in dummy_out.items()]
+        dummy_out_shapes = [(key, value.shape)
+                            for key, value in dummy_out.items()]
 
         print("For dummy input images with shape: (2, 3, 224, 224)")
         for level_name, feature_shape in dummy_out_shapes:
@@ -84,7 +85,48 @@ class DetectorBackboneWithFPN(nn.Module):
         self.fpn_params = nn.ModuleDict()
 
         # Replace "pass" statement with your code
-        pass
+        self.fpn_params["lateral_c3"] = nn.Conv2d(
+            in_channels=dummy_out_shapes[0][1][1],
+            out_channels=out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+        )
+        self.fpn_params['lateral_c4'] = nn.Conv2d(
+            in_channels=dummy_out_shapes[1][1][1],
+            out_channels=out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+        )
+        self.fpn_params['lateral_c5'] = nn.Conv2d(
+            in_channels=dummy_out_shapes[2][1][1],
+            out_channels=out_channels,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+        )
+        self.fpn_params['output_p3'] = nn.Conv2d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1
+        )
+        self.fpn_params['output_p4'] = nn.Conv2d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1
+        )
+        self.fpn_params['output_p5'] = nn.Conv2d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1
+        )
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -111,7 +153,15 @@ class DetectorBackboneWithFPN(nn.Module):
         ######################################################################
 
         # Replace "pass" statement with your code
-        pass
+        m5 = self.fpn_params['lateral_c5'](backbone_feats['c5'])
+        p5 = self.fpn_params['output_p5'](m5)
+        m4 = self.fpn_params['lateral_c4'](backbone_feats['c4']) + F.interpolate(m5, scale_factor=2, mode='nearest')
+        p4 = self.fpn_params['output_p4'](m4)
+        m3 = self.fpn_params['lateral_c3'](backbone_feats['c3']) + F.interpolate(m4, scale_factor=2, mode='nearest')
+        p3 = self.fpn_params['output_p3'](m3)
+        fpn_feats['p3'] = p3
+        fpn_feats['p4'] = p4
+        fpn_feats['p5'] = p5
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -157,7 +207,12 @@ def get_fpn_location_coords(
         # TODO: Implement logic to get location co-ordinates below.          #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+
+        H, W = feat_shape[2], feat_shape[3]
+        x = torch.arange(W, dtype=dtype, device=device) * level_stride + level_stride // 2
+        y = torch.arange(H, dtype=dtype, device=device) * level_stride + level_stride // 2
+        xx, yy = torch.meshgrid(x, y)
+        location_coords[level_name] = torch.stack([xx, yy], dim=-1).reshape(-1, 2)
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -196,7 +251,14 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    _, idx = scores.sort(descending=True)
+    keep = []
+    while idx.numel() > 0:
+        keep.append(idx[0])
+        if idx.numel() == 1:
+            break
+        iou = iou_of(boxes[idx[0]].unsqueeze(0), boxes[idx[1:]])
+        idx = idx[1:][iou <= iou_threshold]
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################
@@ -221,7 +283,8 @@ def class_spec_nms(
     if boxes.numel() == 0:
         return torch.empty((0,), dtype=torch.int64, device=boxes.device)
     max_coordinate = boxes.max()
-    offsets = class_ids.to(boxes) * (max_coordinate + torch.tensor(1).to(boxes))
+    offsets = class_ids.to(boxes) * (max_coordinate +
+                                     torch.tensor(1).to(boxes))
     boxes_for_nms = boxes + offsets[:, None]
     keep = nms(boxes_for_nms, scores, iou_threshold)
     return keep

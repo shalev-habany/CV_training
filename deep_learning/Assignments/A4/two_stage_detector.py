@@ -774,19 +774,25 @@ class RPN(nn.Module):
             # Replace "pass" statement with your code
             fg_idx, bg_idx = sample_rpn_training(
                 matched_gt_boxes, self.batch_size_per_image * num_images, 0.5)
-            combined_idxs = torch.cat((fg_idx, bg_idx))
-            anchor_boxes = anchor_boxes[combined_idxs, :]
-            matched_gt_boxes = matched_gt_boxes[combined_idxs, :]
-            pred_boxreg_deltas = pred_boxreg_deltas[combined_idxs, :]
+            gt_objectness = torch.zeros(
+                pred_obj_logits.shape, device=fg_idx.device)
+            idx = torch.cat((fg_idx, bg_idx))
+            anchor_boxes = anchor_boxes[idx, :]
+            matched_gt_boxes = matched_gt_boxes[idx, :]
+            pred_boxreg_deltas = pred_boxreg_deltas[idx, :]
             gt_deltas = rcnn_get_deltas_from_anchors(
                 anchor_boxes, matched_gt_boxes)
-            loss_box = F.l1_loss(pred_boxreg_deltas,
-                                 gt_deltas, reduction='none')
+
+            loss_box = F.l1_loss(
+                pred_boxreg_deltas, gt_deltas, reduction="none")
             loss_box[gt_deltas == -1e8] *= 0.0
-            gt_obj = torch.zeros_like(pred_obj_logits)
-            gt_obj[fg_idx] = 1
+
+            gt_objectness[fg_idx] = 1
+            pred_obj_logits = pred_obj_logits[idx]
+            gt_objectness = gt_objectness[idx]
             loss_obj = F.binary_cross_entropy_with_logits(
-                pred_obj_logits, gt_obj, reduction='none')
+                pred_obj_logits, gt_objectness, reduction="none"
+            )
             ##################################################################
             #                         END OF YOUR CODE                       #
             ##################################################################
@@ -1218,7 +1224,7 @@ class FasterRCNN(nn.Module):
         ######################################################################
         pred_scores, pred_classes = None, None
         # Replace "pass" statement with your code
-        
+
         pred_scores, pred_classes = torch.max(
             torch.softmax(pred_cls_logits, dim=1), dim=1)
         pred_classes -= 1

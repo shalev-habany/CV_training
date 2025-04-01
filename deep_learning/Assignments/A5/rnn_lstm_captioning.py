@@ -447,7 +447,7 @@ class CaptioningRNN(nn.Module):
         # (2) feature projection (from CNN pooled feature to h0)
         ######################################################################
         # Replace "pass" statement with your code
-        self.image_encoder = image_encoder_pretrained
+        self.image_encoder = ImageEncoder(pretrained=image_encoder_pretrained)
         self.word_emmbedding = WordEmbedding(vocab_size, wordvec_dim)
         if cell_type == 'rnn':
             self.rnn = RNN(wordvec_dim, hidden_dim)
@@ -455,7 +455,13 @@ class CaptioningRNN(nn.Module):
             self.rnn = LSTM(wordvec_dim, hidden_dim)
         elif cell_type == 'attn':
             self.rnn = AttentionLSTM(wordvec_dim, hidden_dim)
-        self.fc = nn.Linear(hidden_dim, vocab_size)
+        self.rnn_to_vocab = nn.Linear(hidden_dim, vocab_size)
+        if cell_type == 'rnn' or cell_type == 'lstm':
+            self.feature_to_h0 = nn.Linear(
+                self.image_encoder.out_channels, hidden_dim)
+        elif cell_type == 'attn':
+            self.feature_to_h0 = nn.Conv2d(
+                self.image_encoder.out_channels, hidden_dim, 1)
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -506,7 +512,17 @@ class CaptioningRNN(nn.Module):
         # Do not worry about regularizing the weights or their gradients!
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        if self.cell_type == 'rnn' or self.cell_type == 'lstm':
+            image_features = self.image_encoder(images)
+            h0 = self.feature_to_h0(image_features.mean(dim=(2, 3)))
+        elif self.cell_type == 'attn':
+            h0 = self.image_encoder(images)
+            h0 = self.feature_to_h0(h0)
+        word_embeddings = self.word_emmbedding(captions_in)
+        h = self.rnn(word_embeddings, h0)
+        scores = self.rnn_to_vocab(h)
+        loss = temporal_softmax_loss(
+            scores, captions_out, ignore_index=self.ignore_index)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -568,7 +584,33 @@ class CaptioningRNN(nn.Module):
         # would both be A.mean(dim=(2, 3)).
         #######################################################################
         # Replace "pass" statement with your code
-        pass
+        if self.cell_type == 'rnn' or self.cell_type == 'lstm':
+            image_features = self.image_encoder(images)
+            h0 = self.feature_to_h0(image_features.mean(dim=(2, 3)))
+        elif self.cell_type == 'attn':
+            h0 = self.image_encoder(images)
+        prev_h = h0
+        prev_c = torch.zeros_like(h0)
+        x = torch.full((N, 1), self._start, dtype=torch.long,
+                       device=images.device)
+        for t in range(max_length):
+            word_embeddings = self.word_emmbedding(x)
+            if self.cell_type == 'rnn':
+                next_h = self.rnn.step_forward(
+                    word_embeddings.squeeze(1), prev_h)
+            elif self.cell_type == 'attn' or self.cell_type == 'lstm':
+                next_h, next_c = self.rnn.step_forward(
+                    word_embeddings.squeeze(1), prev_h, prev_c)
+
+            scores = self.rnn_to_vocab(next_h)
+            x = scores.argmax(dim=1)
+            captions[:, t] = x
+            if self.cell_type == 'attn':
+                attn_weights_all[:, t] = next_c.view(N, -1)
+                prev_c = next_c
+            if self.cell_type == 'lstm':
+                prev_c = next_c
+            prev_h = next_h
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -629,7 +671,14 @@ class LSTM(nn.Module):
         ######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        a = x @ self.Wx + prev_h @ self.Wh + self.b
+        ai, af, ao, ag = a.chunk(4, dim=1)
+        i = torch.sigmoid(ai)
+        f = torch.sigmoid(af)
+        o = torch.sigmoid(ao)
+        g = torch.tanh(ag)
+        next_c = f * prev_c + i * g
+        next_h = o * torch.tanh(next_c)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -663,7 +712,14 @@ class LSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        N, T, D = x.shape
+        H = h0.shape[1]
+        hn = torch.zeros(N, T, H, device=x.device, dtype=x.dtype)
+        prev_h = h0
+        prev_c = c0
+        for t in range(T):
+            prev_h, prev_c = self.step_forward(x[:, t], prev_h, prev_c)
+            hn[:, t] = prev_h
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -694,7 +750,13 @@ def dot_product_attention(prev_h, A):
     # functions. HINT: Make sure you reshape attn_weights back to (N, 4, 4)! #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    flatten_A = A.view(N, H, -1)
+    attn_weights_unnorm = prev_h.unsqueeze(1) @ flatten_A / math.sqrt(H)
+    attn_weights = F.softmax(attn_weights_unnorm, dim=2)
+    attn_weights = attn_weights.squeeze(1)
+    attn = flatten_A @ attn_weights.unsqueeze(2)
+    attn = attn.squeeze(2)
+    attn_weights = attn_weights.view(N, D_a, D_a)
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -758,7 +820,14 @@ class AttentionLSTM(nn.Module):
         #######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        a = x @ self.Wx + prev_h @ self.Wh + attn @ self.Wattn + self.b
+        ai, af, ao, ag = a.chunk(4, dim=1)
+        i = torch.sigmoid(ai)
+        f = torch.sigmoid(af)
+        o = torch.sigmoid(ao)
+        g = torch.tanh(ag)
+        next_c = f * prev_c + i * g
+        next_h = o * torch.tanh(next_c)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -801,7 +870,16 @@ class AttentionLSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        N, T, D = x.shape
+        H = h0.shape[1]
+        hn = torch.zeros(N, T, H, device=x.device, dtype=x.dtype)
+        prev_h = h0
+        prev_c = c0
+        attn = torch.zeros(N, H, device=x.device, dtype=x.dtype)
+        for t in range(T):
+            attn, _ = dot_product_attention(prev_h, A)
+            prev_h, prev_c = self.step_forward(x[:, t], prev_h, prev_c, attn)
+            hn[:, t] = prev_h
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################

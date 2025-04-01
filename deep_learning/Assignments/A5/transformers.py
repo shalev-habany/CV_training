@@ -33,7 +33,7 @@ def generate_token_dict(vocab):
     # elements in between as consequetive number.                                #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    token_dict = {word: i for i, word in enumerate(vocab)}
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -74,7 +74,13 @@ def prepocess_input_sequence(
     # appropriate value for the complete token.
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    tokens = input_str.split()
+    for token in tokens:
+        if token in spc_tokens:
+            out.append(token_dict[token])
+        else:
+            for char in token:
+                out.append(token_dict[char])
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -116,7 +122,15 @@ def scaled_dot_product_two_loop_single(
     # using weighted sum becomes an output to the Kth query vector                #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    K, M = query.shape
+    dot_prod = torch.zeros(K, K)
+    out = torch.zeros(K, M)
+    for i in range(K):
+        for j in range(K):
+            dot_prod[i, j] = torch.dot(query[i], key[j])
+    dot_prod /= M ** 0.5
+    weights = F.softmax(dot_prod, dim=1)
+    out = weights @ value
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -126,7 +140,6 @@ def scaled_dot_product_two_loop_single(
 def scaled_dot_product_two_loop_batch(
     query: Tensor, key: Tensor, value: Tensor
 ) -> Tensor:
-
     """
     The function performs a fundamental block for attention mechanism, the scaled
     dot product. We map the input query, key, and value to the output. Follow the
@@ -163,7 +176,15 @@ def scaled_dot_product_two_loop_batch(
     # Hint: look at torch.bmm                                                     #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    N, K, M = query.shape
+    dot_prod = torch.zeros(N, K, K)
+    out = torch.zeros(N, K, M)
+    for i in range(K):
+        for j in range(K):
+            dot_prod[:, i, j] = torch.sum(query[:, i] * key[:, j], dim=1)
+    dot_prod /= M ** 0.5
+    weights = F.softmax(dot_prod, dim=2)
+    out = weights @ value
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -218,16 +239,18 @@ def scaled_dot_product_no_loop_batch(
     # Hint: look at torch.bmm and torch.masked_fill                               #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    dot_prod = query @ key.transpose(1, 2)
+    dot_prod /= M ** 0.5
     if mask is not None:
         ##########################################################################
         # TODO: Apply the mask to the weight matrix by assigning -1e9 to the     #
         # positions where the mask value is True, otherwise keep it as it is.    #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        dot_prod = dot_prod.masked_fill(mask, -1e9)
     # Replace "pass" statement with your code
-    pass
+    weights_softmax = F.softmax(dot_prod, dim=2)
+    y = weights_softmax @ value
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -239,10 +262,10 @@ class SelfAttention(nn.Module):
         super().__init__()
 
         """
-        This class encapsulates the implementation of self-attention layer. We map 
-        the input query, key, and value using MLP layers and then use 
+        This class encapsulates the implementation of self-attention layer. We map
+        the input query, key, and value using MLP layers and then use
         scaled_dot_product_no_loop_batch to the final output.
-        
+
         args:
             dim_in: an int value for input sequence embedding dimension
             dim_q: an int value for output dimension of query and ley vector
@@ -268,7 +291,14 @@ class SelfAttention(nn.Module):
         # as given above. self.q, self.k, and self.v respectively.               #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.q = nn.Linear(dim_in, dim_q)
+        self.k = nn.Linear(dim_in, dim_q)
+        self.v = nn.Linear(dim_in, dim_v)
+        for layer in [self.q, self.k, self.v]:
+            nn.init.uniform_(
+                layer.weight, -((6 / (dim_in + layer.out_features)) **
+                                0.5), ((6 / (dim_in + layer.out_features)) ** 0.5)
+            )
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -276,7 +306,6 @@ class SelfAttention(nn.Module):
     def forward(
         self, query: Tensor, key: Tensor, value: Tensor, mask: Tensor = None
     ) -> Tensor:
-
         """
         An implementation of the forward pass of the self-attention layer.
 
@@ -303,7 +332,9 @@ class SelfAttention(nn.Module):
         # variable self.weights_softmax                                          #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        Q, K, V = self.q(query), self.k(key), self.v(value)
+        y, self.weights_softmax = scaled_dot_product_no_loop_batch(
+            Q, K, V, mask)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -316,19 +347,19 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
 
         """
-        
+
         A naive implementation of the MultiheadAttention layer for Transformer model.
         We use multiple SelfAttention layers parallely on the same input and then concat
-        them to into a single tensor. This Tensor is then passed through an MLP to 
-        generate the final output. The input shape will look like (N, K, M) where  
-        N is the batch size, K is the batch size and M is the sequence embedding  
+        them to into a single tensor. This Tensor is then passed through an MLP to
+        generate the final output. The input shape will look like (N, K, M) where
+        N is the batch size, K is the batch size and M is the sequence embedding
         dimension.
         args:
             num_heads: int value specifying the number of heads
             dim_in: int value specifying the input dimension of the query, key
                 and value. This will be the input dimension to each of the
                 SingleHeadAttention blocks
-            dim_out: int value specifying the output dimension of the complete 
+            dim_out: int value specifying the output dimension of the complete
                 MultiHeadAttention block
 
 
@@ -354,7 +385,14 @@ class MultiHeadAttention(nn.Module):
         # SelfAttention.                                                         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.attentions = nn.ModuleList(
+            [SelfAttention(dim_in, dim_out, dim_out) for _ in range(num_heads)]
+        )
+        self.linear = nn.Linear(num_heads * dim_out, dim_in)
+        nn.init.uniform_(
+            self.linear.weight, -((6 / (dim_in + self.linear.out_features)) **
+                                  0.5), ((6 / (dim_in + self.linear.out_features)) ** 0.5)
+        )
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -362,7 +400,6 @@ class MultiHeadAttention(nn.Module):
     def forward(
         self, query: Tensor, key: Tensor, value: Tensor, mask: Tensor = None
     ) -> Tensor:
-
         """
         An implementation of the forward pass of the MultiHeadAttention layer.
 
@@ -398,7 +435,9 @@ class MultiHeadAttention(nn.Module):
         # nn.Linear mapping function defined in the initialization step.         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        heads_out = [head(query, key, value, mask) for head in self.attentions]
+        y = torch.cat(heads_out, dim=2)
+        y = self.linear(y)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -409,15 +448,15 @@ class LayerNormalization(nn.Module):
     def __init__(self, emb_dim: int, epsilon: float = 1e-10):
         super().__init__()
         """
-        The class implements the Layer Normalization for Linear layers in 
-        Transformers.  Unlike BathcNorm ,it estimates the normalization statistics 
-        for each element present in the batch and hence does not depend on the  
+        The class implements the Layer Normalization for Linear layers in
+        Transformers.  Unlike BathcNorm ,it estimates the normalization statistics
+        for each element present in the batch and hence does not depend on the
         complete batch.
-        The input shape will look something like (N, K, M) where N is the batch 
-        size, K is the sequence length and M is the sequence length embedding. We 
-        compute the  mean with shape (N, K) and standard deviation with shape (N, K) 
+        The input shape will look something like (N, K, M) where N is the batch
+        size, K is the sequence length and M is the sequence length embedding. We
+        compute the  mean with shape (N, K) and standard deviation with shape (N, K)
         and use them to normalize each sequence.
-        
+
         args:
             emb_dim: int representing embedding dimension
             epsilon: float value
@@ -435,7 +474,8 @@ class LayerNormalization(nn.Module):
         # shift initializations with nn.Parameter                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.gamma = nn.Parameter(torch.ones(emb_dim))
+        self.beta = nn.Parameter(torch.zeros(emb_dim))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -458,11 +498,13 @@ class LayerNormalization(nn.Module):
         # TODO: Implement the forward pass of the LayerNormalization layer.      #
         # Compute the mean and standard deviation of input and use these to      #
         # normalize the input. Further, use self.gamma and self.beta to scale    #
-        # these and shift this normalized input. Don't use torch.std to compute  # 
+        # these and shift this normalized input. Don't use torch.std to compute  #
         # the standard deviation.                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        mu = x.mean(dim=-1, keepdim=True)
+        sigma = torch.sqrt(((x - mu) ** 2).mean(dim=-1, keepdim=True))
+        y = self.gamma * (x - mu) / (sigma + self.epsilon) + self.beta
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -474,18 +516,18 @@ class FeedForwardBlock(nn.Module):
         super().__init__()
 
         """
-        An implementation of the FeedForward block in the Transformers. We pass  
-        the input through stacked 2 MLPs and 1 ReLU layer. The forward pass has  
+        An implementation of the FeedForward block in the Transformers. We pass
+        the input through stacked 2 MLPs and 1 ReLU layer. The forward pass has
         following architecture:
-        
+
         linear - relu -linear
-        
-        The input will have a shape of (N, K, M) where N is the batch size, K is 
-        the sequence length and M is the embedding dimension. 
-        
+
+        The input will have a shape of (N, K, M) where N is the batch size, K is
+        the sequence length and M is the embedding dimension.
+
         args:
             inp_dim: int representing embedding dimension of the input tensor
-                     
+
             hidden_dim_feedforward: int representing the hidden dimension for
                 the feedforward block
         """
@@ -500,7 +542,14 @@ class FeedForwardBlock(nn.Module):
         # change?                                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.mlp1 = nn.Linear(inp_dim, hidden_dim_feedforward)
+        self.relu = nn.ReLU()
+        self.mlp2 = nn.Linear(hidden_dim_feedforward, inp_dim)
+        for layer in [self.mlp1, self.mlp2]:
+            nn.init.uniform_(
+                layer.weight, -((6 / (inp_dim + layer.out_features)) **
+                                0.5), ((6 / (inp_dim + layer.out_features)) ** 0.5)
+            )
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -522,7 +571,7 @@ class FeedForwardBlock(nn.Module):
         # no activation after the second MLP                                      #
         ###########################################################################
         # Replace "pass" statement with your code
-        pass
+        y = self.mlp2(self.relu(self.mlp1(x)))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -535,27 +584,27 @@ class EncoderBlock(nn.Module):
     ):
         super().__init__()
         """
-        This class implements the encoder block for the Transformer model, the 
-        original paper used 6 of these blocks sequentially to train the final model. 
-        Here, we will first initialize the required layers using the building  
-        blocks we have already  implemented, and then finally write the forward     
-        pass using these initialized layers, residual connections and dropouts.        
-        
+        This class implements the encoder block for the Transformer model, the
+        original paper used 6 of these blocks sequentially to train the final model.
+        Here, we will first initialize the required layers using the building
+        blocks we have already  implemented, and then finally write the forward
+        pass using these initialized layers, residual connections and dropouts.
+
         As shown in the Figure 1 of the paper attention is all you need
         https://arxiv.org/pdf/1706.03762.pdf, the encoder consists of four components:
-        
+
         1. MultiHead Attention
         2. FeedForward layer
         3. Residual connections after MultiHead Attention and feedforward layer
         4. LayerNorm
-        
+
         The architecture is as follows:
-        
-       inp - multi_head_attention - out1 - layer_norm(out1 + inp) - dropout - out2 \ 
+
+       inp - multi_head_attention - out1 - layer_norm(out1 + inp) - dropout - out2 \
         - feedforward - out3 - layer_norm(out3 + out2) - dropout - out
-        
-        Here, inp is input of the MultiHead Attention of shape (N, K, M), out1, 
-        out2 and out3 are the outputs of the corresponding layers and we add these 
+
+        Here, inp is input of the MultiHead Attention of shape (N, K, M), out1,
+        out2 and out3 are the outputs of the corresponding layers and we add these
         outputs to their respective inputs for implementing residual connections.
 
         args:
@@ -565,7 +614,7 @@ class EncoderBlock(nn.Module):
             emb_dim: int value specifying the embedding dimension of the input
                 sequence
 
-            feedforward_dim: int value specifying the number of hidden units in the 
+            feedforward_dim: int value specifying the number of hidden units in the
                 FeedForward layer of Transformer
 
             dropout: float value specifying the dropout value
@@ -597,13 +646,19 @@ class EncoderBlock(nn.Module):
         # 4. A Dropout layer with given dropout parameter                        #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+
+        self.multi_head_attention = MultiHeadAttention(
+            num_heads, emb_dim, emb_dim // num_heads)
+        self.num_heads = num_heads
+        self.layer_norm1 = LayerNormalization(emb_dim)
+        self.layer_norm2 = LayerNormalization(emb_dim)
+        self.ff = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.dropout = nn.Dropout(dropout)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
 
     def forward(self, x):
-
         """
 
         An implementation of the forward pass of the EncoderBlock of the
@@ -622,7 +677,12 @@ class EncoderBlock(nn.Module):
         # reference from the architecture written in the fucntion documentation. #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        out1 = self.multi_head_attention(x, x, x)
+        out1 = self.layer_norm1(out1 + x)
+        out2 = self.dropout(out1)
+        out3 = self.ff(out2)
+        y = self.layer_norm2(out3 + out2)
+        y = self.dropout(y)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -655,7 +715,7 @@ def get_subsequent_mask(seq):
     #                                                                             #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    mask = torch.triu(torch.ones(seq.size(1), seq.size(1)), diagonal=1).bool()
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -675,48 +735,48 @@ class DecoderBlock(nn.Module):
             )
 
         """
-        The function implements the DecoderBlock for the Transformer model. In the 
-        class we learned about encoder only model that can be used for tasks like 
-        sequence classification but for more complicated tasks like sequence to 
-        sequence we need a decoder network that can transformt the output of the 
-        encoder to a target sequence. This kind of architecture is important in 
-        tasks like language translation where we have a sequence as input and a 
-        sequence as output. 
-        
+        The function implements the DecoderBlock for the Transformer model. In the
+        class we learned about encoder only model that can be used for tasks like
+        sequence classification but for more complicated tasks like sequence to
+        sequence we need a decoder network that can transformt the output of the
+        encoder to a target sequence. This kind of architecture is important in
+        tasks like language translation where we have a sequence as input and a
+        sequence as output.
+
         As shown in the Figure 1 of the paper attention is all you need
-        https://arxiv.org/pdf/1706.03762.pdf, the encoder consists of 5 components:   
-        
+        https://arxiv.org/pdf/1706.03762.pdf, the encoder consists of 5 components:
+
         1. Masked MultiHead Attention
         2. MultiHead Attention
         3. FeedForward layer
         4. Residual connections after MultiHead Attention and feedforward layer
-        5. LayerNorm        
-        
-        The Masked MultiHead Attention takes the target, masks it as per the 
-        function get_subsequent_mask and then gives the output as per the MultiHead  
-        Attention layer. Further, another Multihead Attention block here takes the  
-        encoder output and the output from Masked Multihead Attention layer giving  
-        the output that helps the model create interaction between input and 
-        targets. As this block helps in interation of the input and target, it  
+        5. LayerNorm
+
+        The Masked MultiHead Attention takes the target, masks it as per the
+        function get_subsequent_mask and then gives the output as per the MultiHead
+        Attention layer. Further, another Multihead Attention block here takes the
+        encoder output and the output from Masked Multihead Attention layer giving
+        the output that helps the model create interaction between input and
+        targets. As this block helps in interation of the input and target, it
         is also sometimes called the cross attention.
 
         The architecture is as follows:
-        
+
         inp - masked_multi_head_attention - out1 - layer_norm(inp + out1) - \
         dropout - (out2 and enc_out) -  multi_head_attention - out3 - \
         layer_norm(out3 + out2) - dropout - out4 - feed_forward - out5 - \
         layer_norm(out5 + out4) - dropout - out
-        
-        Here, out1, out2, out3, out4, out5 are the corresponding outputs for the 
-        layers, enc_out is the encoder output and we add these outputs to their  
+
+        Here, out1, out2, out3, out4, out5 are the corresponding outputs for the
+        layers, enc_out is the encoder output and we add these outputs to their
         respective inputs for implementing residual connections.
-        
+
         args:
             num_heads: int value representing number of heads
 
             emb_dim: int value representing embedding dimension
 
-            feedforward_dim: int representing hidden layers in the feed forward 
+            feedforward_dim: int representing hidden layers in the feed forward
                 model
 
             dropout: float representing the dropout value
@@ -749,7 +809,6 @@ class DecoderBlock(nn.Module):
     def forward(
         self, dec_inp: Tensor, enc_inp: Tensor, mask: Tensor = None
     ) -> Tensor:
-
         """
         args:
             dec_inp: a Tensor of shape (N, K, M)
@@ -833,7 +892,7 @@ class Decoder(nn.Module):
         first pass the input through stacked DecoderBlocks and then
         project the output to vocab_len which is required to get the
         actual sequence.
-        
+
         args:
             num_heads: Int representing number of heads in the MultiheadAttention
             for Transformer
@@ -893,7 +952,6 @@ def position_encoding_simple(K: int, M: int) -> Tensor:
 
 
 def position_encoding_sinusoid(K: int, M: int) -> Tensor:
-
     """
     An implementation of the sinousoidal positional encodings.
 
@@ -936,13 +994,13 @@ class Transformer(nn.Module):
         """
         The class implements Transformer model with encoder and decoder. The input
         to the model is a tensor of shape (N, K) and the output is a tensor of shape
-        (N*O, V). Here, N is the batch size, K is the input sequence length, O is  
-        the output sequence length and V is the Vocabulary size. The input is passed  
-        through shared nn.Embedding layer and then added to input positonal 
+        (N*O, V). Here, N is the batch size, K is the input sequence length, O is
+        the output sequence length and V is the Vocabulary size. The input is passed
+        through shared nn.Embedding layer and then added to input positonal
         encodings. Similarily, the target is passed through the same nn.Embedding
         layer and added to the target positional encodings. The only difference
-        is that we take last but one  value in the target. The summed 
-        inputs(look at the code for detials) are then sent through the encoder and  
+        is that we take last but one  value in the target. The summed
+        inputs(look at the code for detials) are then sent through the encoder and
         decoder blocks  to get the  final output.
         args:
             num_heads: int representing number of heads to be used in Encoder
@@ -982,7 +1040,6 @@ class Transformer(nn.Module):
     def forward(
         self, ques_b: Tensor, ques_pos: Tensor, ans_b: Tensor, ans_pos: Tensor
     ) -> Tensor:
-
         """
 
         An implementation of the forward pass of the Transformer.
@@ -1035,7 +1092,6 @@ class AddSubDataset(torch.utils.data.Dataset):
         emb_dim,
         pos_encode,
     ):
-
         """
         The class implements the dataloader that will be used for the toy dataset.
 

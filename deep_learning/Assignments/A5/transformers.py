@@ -247,7 +247,7 @@ def scaled_dot_product_no_loop_batch(
         # positions where the mask value is True, otherwise keep it as it is.    #
         ##########################################################################
         # Replace "pass" statement with your code
-        dot_prod = dot_prod.masked_fill(mask, -1e9)
+        dot_prod = torch.masked_fill(dot_prod, mask.to(dot_prod.device), -1e9)  
     # Replace "pass" statement with your code
     weights_softmax = F.softmax(dot_prod, dim=2)
     y = weights_softmax @ value
@@ -715,7 +715,8 @@ def get_subsequent_mask(seq):
     #                                                                             #
     ###############################################################################
     # Replace "pass" statement with your code
-    mask = torch.triu(torch.ones(seq.size(1), seq.size(1)), diagonal=1).bool()
+    mask = torch.triu(torch.ones(seq.size(1), seq.size(1)), 1).bool()
+    mask = mask.unsqueeze(0).expand(seq.size(0), seq.size(1), seq.size(1))
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -801,7 +802,13 @@ class DecoderBlock(nn.Module):
         ##########################################################################
 
         # Replace "pass" statement with your code
-        pass
+        self.attention_self = MultiHeadAttention(num_heads, emb_dim, emb_dim // num_heads)
+        self.attention_cross = MultiHeadAttention(num_heads, emb_dim, emb_dim // num_heads)
+        self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.norm1 = LayerNormalization(emb_dim)
+        self.norm2 = LayerNormalization(emb_dim)
+        self.norm3 = LayerNormalization(emb_dim)
+        self.dropout = nn.Dropout(dropout)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -830,7 +837,12 @@ class DecoderBlock(nn.Module):
         # pass. Don't forget to apply the residual connections for different layers.
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        out1 = self.attention_self(dec_inp, dec_inp, dec_inp, mask)
+        out2 = self.dropout(self.norm1(out1 + dec_inp))
+        out3 = self.attention_cross(out2, enc_inp, enc_inp)
+        out4 = self.dropout(self.norm2(out3 + out2))
+        out5 = self.feed_forward(out4)
+        y = self.dropout(self.norm3(out5 + out4))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -944,7 +956,8 @@ def position_encoding_simple(K: int, M: int) -> Tensor:
     # times to create a tensor of the required output shape                      #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    pos_addings = torch.arange(K) / K
+    y = pos_addings.repeat(M, 1).T.unsqueeze(0)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -971,7 +984,13 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
     # alternating sines and cosines along the embedding dimension M.             #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    odd_indices = torch.arange(1, M, 2)
+    even_indices = torch.arange(0, M, 2)
+    p = torch.arange(K).float()
+    y = torch.zeros(K, M)
+    y[:, even_indices] = torch.sin(p[:, None] / 10000 ** torch.floor(even_indices / M))
+    y[:, odd_indices] = torch.cos(p[:, None] / 10000 ** torch.floor(odd_indices / M))
+    y = y.unsqueeze(0)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -1021,7 +1040,7 @@ class Transformer(nn.Module):
         # name of this layer as self.emb_layer                                   #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.emb_layer = nn.Embedding(vocab_len, emb_dim)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -1074,7 +1093,10 @@ class Transformer(nn.Module):
         # Hint: the mask shape will depend on the Tensor ans_b
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        enc_out = self.encoder(q_emb_inp)
+        mask = get_subsequent_mask(ans_b[:, :-1])
+        dec_out = self.decoder(a_emb_inp, enc_out, mask)
+        dec_out = dec_out.view(-1, dec_out.size(-1))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
